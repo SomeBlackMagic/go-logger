@@ -54,6 +54,41 @@ return a constructor error identifying `LOG_LEVEL`.
 The variable is read once when New creates a logger. Subsequent changes use
 SetDefaultLevel; existing loggers do not reread the environment.
 
+## Runtime configuration
+
+All methods below are safe to call concurrently. Changes apply to existing
+loggers derived through Category, Named, or With; separate calls to New have
+independent configuration. Category arguments are absolute: calling
+`log.Category("http").SetCategoryLevel("database", logger.WarnLevel)` updates
+`database`, not `http.database`.
+
+| Method | Effect |
+| --- | --- |
+| `Resolve(category)` | Returns the inherited level and enabled state. |
+| `SetDefaultLevel(level)` | Replaces the fallback, including an initial LOG_LEVEL value; explicit category rules remain. |
+| `SetCategoryLevel(category, level)` | Sets a level override, preserving the enabled setting. |
+| `SetCategoryEnabled(category, enabled)` | Sets an enabled override, preserving the level setting. |
+| `ResetCategory(category)` | Removes both local overrides; explicit descendant rules remain. |
+
+Update methods return validation errors without modifying configuration.
+Resetting a valid category with no override succeeds. Each update publishes one
+complete snapshot; multiple method calls are separate updates. No method writes
+to the environment or a configuration file.
+
+```go
+if err := log.SetDefaultLevel(logger.WarnLevel); err != nil {
+    return err
+}
+if err := log.SetCategoryLevel("rabbitmq.consumer", logger.DebugLevel); err != nil {
+    return err
+}
+// Existing consumer loggers now accept debug entries.
+if err := log.ResetCategory("rabbitmq.consumer"); err != nil {
+    return err
+}
+// The consumer inherits its nearest parent's level, or warn if none overrides it.
+```
+
 ## Architecture
 
 - `internal/policy`: levels, category validation, immutable configuration values,
@@ -63,6 +98,8 @@ SetDefaultLevel; existing loggers do not reread the environment.
 - `core.go`: zap adapter consuming a small resolver interface, filtering before
   serialization, and synchronizing access to the output writer.
 - `encoder.go`: JSON formatting and recursive sensitive-key masking.
+- `environment.go`: reads and validates the environment override at construction,
+  outside the policy layer.
 - `logger.go`, `config.go`, `fields.go`: public API and constructor wiring.
 
 There are no global logger instances or background goroutines. Applications
