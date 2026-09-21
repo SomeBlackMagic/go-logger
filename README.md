@@ -9,7 +9,7 @@ if err != nil {
     return err
 }
 consumer := log.Category("rabbitmq").Category("consumer")
-consumer.Info("message received", logger.String("queue", "events"))
+consumer.Info("message received", map[string]any{"queue": "events"})
 if err := log.SetCategoryLevel("rabbitmq", logger.DebugLevel); err != nil {
     return err
 }
@@ -97,6 +97,8 @@ if err := log.ResetCategory("rabbitmq.consumer"); err != nil {
   configuration mutex; mutable input maps and pointers are copied at construction.
 - `core.go`: zap adapter consuming a small resolver interface, filtering before
   serialization, and synchronizing access to the output writer.
+- `arguments.go`: lazy adaptation of arbitrary values to zap fields; JSON and
+  reflection are confined to this infrastructure adapter.
 - `encoder.go`: JSON formatting and recursive sensitive-key masking.
 - `environment.go`: reads and validates the environment override at construction,
   outside the policy layer.
@@ -108,6 +110,70 @@ for this library. Output is injectable via WithOutput and WithErrorOutput. WithS
 a stacktrace inside extra at the chosen threshold, after category filtering.
 
 ## Fields and masking
+
+Logging methods and With accept arbitrary JSON-compatible values directly:
+
+```go
+log.Error("request failed", err)
+log.Info("response received", response)
+log.Info("response received", response, logger.String("request_id", "abc"))
+```
+
+For example, a response struct keeps its JSON field names:
+
+```go
+response := struct {
+    Status int    `json:"status"`
+    Token  string `json:"token"`
+}{Status: 200, Token: "private"}
+log.Info("response received", response)
+```
+
+The resulting `extra` is `{"status":200,"token":"***"}`. For
+`err := errors.New("connection refused")`, `log.Error("request failed", err)`
+produces `extra: {"error":"connection refused"}`. Error text is not scanned
+for credentials. A direct error contributes its message, not its internal fields.
+
+| Argument | Representation inside extra |
+| --- | --- |
+| Struct or map producing a JSON object | Its properties are merged directly into extra; JSON tags are respected. |
+| Error | `{"error":"error message"}` |
+| Scalar, slice, array, or nil | `{"value":...}` |
+| zap object marshaler | Its fields are merged directly into extra. |
+| Named field helper or zap field | The explicitly named field is used. |
+
+Multiple arguments merge from left to right; later values replace earlier keys,
+including fields retained by With. Use named Any fields when distinct objects or
+errors must remain separate. Masking applies after merging, including nested
+objects. Custom JSON/object marshalers run only for accepted entries. Values that
+cannot be JSON encoded produce zap's field-encoding diagnostic in extra.
+
+With accepts the same inputs and retains them for subsequent entries:
+
+```go
+requestLog := log.With(map[string]any{"request_id": "abc", "status": 100})
+requestLog.Info("response received", response) // response.status replaces 100.
+requestLog.Error("request failed", err)       // Keeps request_id and status 100.
+```
+
+Direct errors share the `error` key; direct scalars and arrays share the `value`
+key, so only the last value for each key remains. To keep multiple values:
+
+```go
+log.Info("comparison", logger.Any("previous", previous), logger.Any("current", current))
+log.Error("request failed", logger.Any("request_error", err), logger.Any("cleanup_error", cleanupErr))
+```
+
+With no arguments, `extra` is `{}`. An explicit nil (including a typed nil pointer)
+produces `{"value":null}`. Struct serialization follows encoding/json, including
+exported fields, JSON tags and custom MarshalJSON methods. An empty object has no
+properties to merge. A `[]logger.Field` is treated as a group of named fields,
+not as an ordinary array.
+
+Methods now take `...any`. Existing individual field arguments still work.
+For a `[]logger.Field` or `[]zap.Field`, pass the slice as one argument
+(`log.Info("event", fields)`) instead of expanding it with `fields...`.
+Expanded `[]any` arguments are supported. The Field alias remains a zap.Field.
 
 Field helpers accept structured values; zap fields can also be passed directly.
 Password, passwd, token, access_token, refresh_token, authorization, cookie,

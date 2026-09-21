@@ -7,6 +7,8 @@ import (
 	"go.uber.org/zap/zapcore"
 )
 
+// Field is a named zap field. Logging methods also accept arbitrary values directly.
+// A []Field can be passed as one argument, without variadic expansion.
 type Field = zap.Field
 
 func String(key, value string) Field                         { return zap.String(key, value) }

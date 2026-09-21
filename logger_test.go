@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -388,5 +389,72 @@ func TestUnsetEnvironmentDefaultsToInfo(t *testing.T) {
 	must(t, err)
 	if l.Resolve("anything.child").Level != logging.InfoLevel {
 		t.Fatal("missing environment must default to info")
+	}
+}
+
+func TestDirectArguments(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		values []any
+		want   string
+	}{
+		{"error", []any{errors.New("connection refused")}, `{"error":"connection refused"}`},
+		{"struct", []any{struct {
+			Status int    `json:"status"`
+			Token  string `json:"token"`
+		}{200, "secret"}}, `{"status":200,"token":"***"}`},
+		{"map", []any{map[string]any{"nested": map[string]any{"password": "secret"}, "count": uint64(18446744073709551615)}}, `{"nested":{"password":"***"},"count":18446744073709551615}`},
+		{"mixed", []any{map[string]any{"status": 200}, logging.Int("status", 201), errors.New("failed")}, `{"status":201,"error":"failed"}`},
+		{"array", []any{[]int{1, 2}}, `{"value":[1,2]}`},
+		{"scalar", []any{"text"}, `{"value":"text"}`},
+		{"nil", []any{nil}, `{"value":null}`},
+		{"typed nil", []any{(*counted)(nil)}, `{"value":null}`},
+		{"field slice", []any{[]logging.Field{logging.Int("status", 200)}}, `{"status":200}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			l, b := newLogger(t, logging.Config{})
+			l.Info("received", tc.values...)
+			var record map[string]json.RawMessage
+			must(t, json.Unmarshal(b.Bytes(), &record))
+			var got, want any
+			decode := func(data []byte, target *any) {
+				d := json.NewDecoder(bytes.NewReader(data))
+				d.UseNumber()
+				must(t, d.Decode(target))
+			}
+			decode(record["extra"], &got)
+			decode([]byte(tc.want), &want)
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("got %s, want %s", record["extra"], tc.want)
+			}
+		})
+	}
+}
+
+type jsonCounter struct{ calls *atomic.Int32 }
+
+func (v jsonCounter) MarshalJSON() ([]byte, error) {
+	v.calls.Add(1)
+	return []byte(`{"token":"secret","status":200}`), nil
+}
+func TestDirectArgumentsAreLazy(t *testing.T) {
+	l, b := newLogger(t, logging.Config{})
+	var calls atomic.Int32
+	child := l.With(jsonCounter{&calls})
+	child.Debug("filtered", jsonCounter{&calls})
+	if calls.Load() != 0 || b.Len() != 0 {
+		t.Fatal("serialized filtered input")
+	}
+	child.Info("accepted", jsonCounter{&calls})
+	if calls.Load() != 2 || strings.Contains(b.String(), "secret") {
+		t.Fatalf("calls=%d output=%s", calls.Load(), b.String())
+	}
+}
+func TestDirectObjectMarshaler(t *testing.T) {
+	l, b := newLogger(t, logging.Config{})
+	var calls atomic.Int32
+	l.Info("object", counted{&calls})
+	if calls.Load() != 1 || strings.Contains(b.String(), "hidden-secret") || !strings.Contains(b.String(), `"name":"safe"`) {
+		t.Fatal(b.String())
 	}
 }

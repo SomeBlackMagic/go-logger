@@ -68,20 +68,50 @@ func (l *Logger) Category(name string) *Logger {
 }
 func (l *Logger) Named(name string) *Logger { return l.Category(name) }
 
-// With retains fields until an accepted entry is serialized. Values must not be
-// mutated concurrently with logging; object marshalers must be concurrency safe.
-func (l *Logger) With(fields ...Field) *Logger {
-	return &Logger{log: l.log.With(fields...), store: l.store}
+// With returns a derived logger retaining arbitrary values and named fields.
+// It uses the same extra mapping as Info. Per-entry values override retained keys.
+// Serialization is deferred until an entry is accepted. Retained values must not
+// be mutated concurrently with logging; marshalers must be concurrency safe.
+func (l *Logger) With(values ...any) *Logger {
+	return &Logger{log: l.log.With(arguments(values)...), store: l.store}
 }
-func (l *Logger) Debug(msg string, fields ...Field)  { l.log.Debug(msg, fields...) }
-func (l *Logger) Info(msg string, fields ...Field)   { l.log.Info(msg, fields...) }
-func (l *Logger) Warn(msg string, fields ...Field)   { l.log.Warn(msg, fields...) }
-func (l *Logger) Error(msg string, fields ...Field)  { l.log.Error(msg, fields...) }
-func (l *Logger) DPanic(msg string, fields ...Field) { l.log.DPanic(msg, fields...) }
 
-// Panic and Fatal retain zap's control-flow behavior even when output is disabled.
-func (l *Logger) Panic(msg string, fields ...Field) { l.log.Panic(msg, fields...) }
-func (l *Logger) Fatal(msg string, fields ...Field) { l.log.Fatal(msg, fields...) }
+// Logging methods accept named fields, errors, and arbitrary JSON-compatible values.
+// Objects merge into extra; errors use extra.error; other values use extra.value.
+func (l *Logger) write(level zapcore.Level, msg string, values []any) {
+	if entry := l.log.Check(level, msg); entry != nil {
+		entry.Write(arguments(values)...)
+	}
+}
+
+// Debug logs accepted debug entries. Values use the same extra mapping as Info.
+func (l *Logger) Debug(msg string, values ...any) { l.write(zapcore.DebugLevel, msg, values) }
+
+// Info logs accepted info entries. Structs and maps producing JSON objects
+// merge into extra, errors use extra.error, and other values use extra.value.
+// Named fields are supported alongside direct values. Later keys override earlier
+// ones. A []Field is passed as one argument, without variadic expansion.
+// JSON encoding and recursive sensitive-key masking happen after filtering.
+func (l *Logger) Info(msg string, values ...any) { l.write(zapcore.InfoLevel, msg, values) }
+
+// Warn logs accepted warning entries. Values use the same extra mapping as Info.
+func (l *Logger) Warn(msg string, values ...any) { l.write(zapcore.WarnLevel, msg, values) }
+
+// Error logs accepted error entries. Pass an error directly to record its
+// message in extra.error, or use the other value forms documented by Info.
+func (l *Logger) Error(msg string, values ...any) { l.write(zapcore.ErrorLevel, msg, values) }
+
+// DPanic logs at dpanic level without panicking in production mode.
+// Values use the same extra mapping as Info.
+func (l *Logger) DPanic(msg string, values ...any) { l.write(zapcore.DPanicLevel, msg, values) }
+
+// Panic logs at panic level and panics even when output is disabled.
+// Values use the same extra mapping as Info.
+func (l *Logger) Panic(msg string, values ...any) { l.write(zapcore.PanicLevel, msg, values) }
+
+// Fatal logs at fatal level and exits the process even when output is disabled.
+// Values use the same extra mapping as Info.
+func (l *Logger) Fatal(msg string, values ...any) { l.write(zapcore.FatalLevel, msg, values) }
 func (l *Logger) Sync() error {
 	if err := l.log.Sync(); err != nil {
 		return fmt.Errorf("sync logger: %w", err)
