@@ -274,7 +274,7 @@ func BenchmarkLogging(b *testing.B) {
 }
 
 func TestChildIsolationAndLevels(t *testing.T) {
-	l, b := newLogger(t, logging.Config{DefaultLevel: logging.DebugLevel})
+	l, b := newLogger(t, logging.Config{DefaultLevel: logging.TraceLevel})
 	base := l.With(logging.String("base", "yes"))
 	left := base.With(logging.String("left", "yes"))
 	right := base.With(logging.String("right", "yes"))
@@ -286,6 +286,7 @@ func TestChildIsolationAndLevels(t *testing.T) {
 		t.Fatal(b.String())
 	}
 	b.Reset()
+	l.Trace("trace")
 	l.Debug("debug")
 	l.Info("info")
 	l.Warn("warn")
@@ -299,7 +300,7 @@ func TestChildIsolationAndLevels(t *testing.T) {
 		}()
 		l.Panic("panic")
 	}()
-	for _, level := range []string{"debug", "info", "warn", "error", "dpanic", "panic"} {
+	for _, level := range []string{"trace", "debug", "info", "warn", "error", "dpanic", "panic"} {
 		if !strings.Contains(b.String(), `"level":"`+level+`"`) {
 			t.Fatal(b.String())
 		}
@@ -343,6 +344,7 @@ func TestDefaultLevelFromEnvironment(t *testing.T) {
 		{name: "empty defaults to info", want: logging.InfoLevel},
 		{name: "empty preserves configuration", configured: logging.WarnLevel, want: logging.WarnLevel},
 		{name: "without file", env: "debug", want: logging.DebugLevel},
+		{name: "trace", env: "TRACE", want: logging.TraceLevel},
 		{name: "overrides configuration", env: "error", configured: logging.DebugLevel, want: logging.ErrorLevel},
 		{name: "normalizes case and whitespace", env: " WARN ", want: logging.WarnLevel},
 		{name: "whitespace preserves configuration", env: "  ", configured: logging.ErrorLevel, want: logging.ErrorLevel},
@@ -368,7 +370,7 @@ func TestDefaultLevelFromEnvironment(t *testing.T) {
 				t.Fatal("environment overwrote category override")
 			}
 			l.Debug("debug")
-			if (output.Len() > 0) != (tc.want == logging.DebugLevel) {
+			if (output.Len() > 0) != (tc.want == logging.DebugLevel || tc.want == logging.TraceLevel) {
 				t.Fatalf("unexpected debug filtering: %s", output.String())
 			}
 			t.Setenv(logging.DefaultLevelEnv, "fatal")
@@ -455,6 +457,23 @@ func TestDirectObjectMarshaler(t *testing.T) {
 	var calls atomic.Int32
 	l.Info("object", counted{&calls})
 	if calls.Load() != 1 || strings.Contains(b.String(), "hidden-secret") || !strings.Contains(b.String(), `"name":"safe"`) {
+		t.Fatal(b.String())
+	}
+}
+
+func TestTraceLevelFiltering(t *testing.T) {
+	l, b := newLogger(t, logging.Config{DefaultLevel: logging.DebugLevel})
+	child := l.Category("db")
+	child.Trace("hidden")
+	if b.Len() != 0 {
+		t.Fatalf("trace must be filtered at debug level: %s", b.String())
+	}
+	must(t, l.SetCategoryLevel("db", logging.TraceLevel))
+	child.Trace("visible", logging.String("query", "select 1"))
+	l.Trace("root hidden")
+	var record map[string]any
+	must(t, json.Unmarshal(b.Bytes(), &record))
+	if record["level"] != "trace" || record["msg"] != "visible" || record["category"] != "db" {
 		t.Fatal(b.String())
 	}
 }

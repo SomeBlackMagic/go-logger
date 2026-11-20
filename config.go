@@ -10,6 +10,7 @@ import (
 type Level = policy.Level
 
 const (
+	TraceLevel        = policy.Trace
 	DebugLevel        = policy.Debug
 	InfoLevel         = policy.Info
 	WarnLevel         = policy.Warn
