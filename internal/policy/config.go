@@ -9,6 +9,7 @@ import (
 type Level string
 
 const (
+	Trace  Level = "trace"
 	Debug  Level = "debug"
 	Info   Level = "info"
 	Warn   Level = "warn"
@@ -20,7 +21,7 @@ const (
 
 func (l Level) Valid() bool {
 	switch l {
-	case Debug, Info, Warn, Error, DPanic, Panic, Fatal:
+	case Trace, Debug, Info, Warn, Error, DPanic, Panic, Fatal:
 		return true
 	}
 	return false

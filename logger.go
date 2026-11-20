@@ -84,6 +84,10 @@ func (l *Logger) write(level zapcore.Level, msg string, values []any) {
 	}
 }
 
+// Trace logs accepted trace entries, the most verbose level below Debug.
+// Values use the same extra mapping as Info.
+func (l *Logger) Trace(msg string, values ...any) { l.write(zapTraceLevel, msg, values) }
+
 // Debug logs accepted debug entries. Values use the same extra mapping as Info.
 func (l *Logger) Debug(msg string, values ...any) { l.write(zapcore.DebugLevel, msg, values) }
 

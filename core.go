@@ -21,8 +21,17 @@ type categoryCore struct {
 	location   *time.Location
 }
 
+// zapTraceLevel extends zap below DebugLevel; zap has no native trace level.
+const zapTraceLevel = zapcore.DebugLevel - 1
+
 // Enabled cannot inspect the category. Check performs the precise decision.
-func (c *categoryCore) Enabled(level zapcore.Level) bool { return level >= zapcore.DebugLevel }
+func (c *categoryCore) Enabled(level zapcore.Level) bool { return level >= zapTraceLevel }
+func levelName(level zapcore.Level) string {
+	if level == zapTraceLevel {
+		return string(TraceLevel)
+	}
+	return level.String()
+}
 func category(name string) string {
 	if name == "" {
 		return "application"
@@ -38,6 +47,8 @@ func (c *categoryCore) Check(e zapcore.Entry, ce *zapcore.CheckedEntry) *zapcore
 }
 func zapLevel(level Level) zapcore.Level {
 	switch level {
+	case TraceLevel:
+		return zapTraceLevel
 	case DebugLevel:
 		return zapcore.DebugLevel
 	case WarnLevel:
@@ -70,7 +81,7 @@ func (c *categoryCore) Write(e zapcore.Entry, fields []zapcore.Field) error {
 		return fmt.Errorf("encode extra: %w", err)
 	}
 	enc := newJSONEncoder()
-	root := []zapcore.Field{zap.String("date", e.Time.In(c.location).Format(c.dateFormat)), zap.String("level", e.Level.String()), zap.String("category", category(e.LoggerName)), zap.String("msg", e.Message), zap.Reflect("extra", extra)}
+	root := []zapcore.Field{zap.String("date", e.Time.In(c.location).Format(c.dateFormat)), zap.String("level", levelName(e.Level)), zap.String("category", category(e.LoggerName)), zap.String("msg", e.Message), zap.Reflect("extra", extra)}
 	buf, err := enc.EncodeEntry(zapcore.Entry{}, root)
 	if err != nil {
 		return fmt.Errorf("encode entry: %w", err)

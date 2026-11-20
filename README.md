@@ -31,7 +31,7 @@ left to the application.
 
 The logger does not require or open a configuration file. If the application's
 optional config file is absent, pass `Config{}` to `New`: every category uses
-`info` unless `LOG_LEVEL` is set, so by default debug entries are filtered and
+`info` unless `LOG_LEVEL` is set, so by default trace and debug entries are filtered and
 info/warn/error entries are written.
 The application should handle a missing file before calling New; other file
 errors and invalid configuration should still be reported.
@@ -44,7 +44,7 @@ Check may finish writing after an update.
 
 ## Environment configuration
 
-Set `LOG_LEVEL=debug` (or info, warn, error, dpanic, panic, fatal) to override
+Set `LOG_LEVEL=debug` (or trace, info, warn, error, dpanic, panic, fatal) to override
 the default level without a configuration file. Priority: nonempty `LOG_LEVEL`,
 then `Config.DefaultLevel`, then `info`. Individual category overrides retain
 their priority. Values are case-insensitive and surrounding whitespace is ignored.
